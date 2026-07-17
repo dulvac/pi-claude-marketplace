@@ -33,6 +33,7 @@ import {
 } from "./marketplace";
 import { join } from "node:path";
 import { pickFromList } from "./ui";
+import { mcpAdapterInstalled, pluginHasMcpServers, pluginMcpServers, syncManagedMcpServers } from "./mcp";
 
 const SUBCOMMANDS = ["add", "remove", "install", "uninstall", "update", "list"] as const;
 
@@ -100,6 +101,8 @@ async function collectResources(
   const marketplaces = withClaudeSettingsMarketplaces(config, cwd);
   const skillPaths = new Set<string>();
   const promptPaths = new Set<string>();
+  const mcpSupported = mcpAdapterInstalled(cwd);
+  const desiredMcpServers: Record<string, unknown> = {};
 
   // Rebuild the namespaced shadow resources from scratch each discovery pass,
   // so uninstalled plugins leave nothing behind.
@@ -128,9 +131,17 @@ async function collectResources(
         const resources = materializePluginResources(pluginDir, namespace, outDir);
         if (resources.skills) skillPaths.add(resources.skills);
         if (resources.prompts) promptPaths.add(resources.prompts);
+        if (mcpSupported) Object.assign(desiredMcpServers, pluginMcpServers(pluginDir, namespace));
       } catch {
         // external plugin clone failed: skip
       }
+    }
+  }
+  if (mcpSupported || (config.managedMcpServers ?? []).length > 0) {
+    try {
+      if (syncManagedMcpServers(config, desiredMcpServers)) saveConfig(config);
+    } catch {
+      // never let MCP sync break resource discovery
     }
   }
   return { skillPaths: [...skillPaths], promptPaths: [...promptPaths] };
@@ -223,10 +234,12 @@ async function browse(exec: Exec, ctx: ExtensionCommandContext): Promise<void> {
     return;
   }
   const resources = supportedResources(pluginDir);
-  const skipped = unsupportedFeatures(pluginDir);
-  if (!resources.skills && !resources.prompts) {
+  const mcpSupported = mcpAdapterInstalled(ctx.cwd);
+  const hasMcp = mcpSupported && pluginHasMcpServers(pluginDir);
+  const skipped = unsupportedFeatures(pluginDir, { mcpSupported });
+  if (!resources.skills && !resources.prompts && !hasMcp) {
     ctx.ui.notify(
-      `${picked} has no skills or commands pi can load${skipped.length > 0 ? ` (only: ${skipped.join(", ")})` : ""}.`,
+      `${picked} has no skills, commands, or MCP servers pi can load${skipped.length > 0 ? ` (only: ${skipped.join(", ")})` : ""}.`,
       "warning",
     );
     return;
@@ -234,6 +247,7 @@ async function browse(exec: Exec, ctx: ExtensionCommandContext): Promise<void> {
   const parts: string[] = [];
   if (resources.skills) parts.push("skills");
   if (resources.prompts) parts.push("commands");
+  if (hasMcp) parts.push("MCP servers via pi-mcp-adapter");
   let message = `Install ${picked} (${parts.join(" + ")}) from ${mpName}?`;
   if (skipped.length > 0) message += `\nNot supported in pi, will be skipped: ${skipped.join(", ")}`;
   const ok = await ctx.ui.confirm("Install plugin", message);
@@ -343,7 +357,7 @@ async function installByName(
     if (!plugin || !manifest) continue;
     const pluginDir = await resolvePluginDir(exec, dir, plugin);
     if (!pluginDir) continue;
-    const skipped = unsupportedFeatures(pluginDir);
+    const skipped = unsupportedFeatures(pluginDir, { mcpSupported: mcpAdapterInstalled(ctx.cwd) });
     if (skipped.length > 0) {
       ctx.ui.notify(`${pluginName}: skipping unsupported features: ${skipped.join(", ")}`, "warning");
     }

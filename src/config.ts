@@ -18,6 +18,8 @@ export interface PluginsConfig {
   marketplaces: Record<string, MarketplaceSource>;
   /** marketplace name -> installed plugin names */
   installed: Record<string, string[]>;
+  /** MCP server names we registered in the pi-mcp-adapter config (mcp.json). */
+  managedMcpServers?: string[];
 }
 
 export const AGENT_DIR = join(homedir(), ".pi", "agent");
@@ -35,9 +37,12 @@ export function loadConfig(): PluginsConfig {
     for (const [name, plugins] of Object.entries(raw.installed ?? {})) {
       if (Array.isArray(plugins)) installed[name] = plugins.filter((p) => typeof p === "string");
     }
-    return { marketplaces, installed };
+    const managedMcpServers = Array.isArray(raw.managedMcpServers)
+      ? raw.managedMcpServers.filter((n) => typeof n === "string")
+      : [];
+    return { marketplaces, installed, managedMcpServers };
   } catch {
-    return { marketplaces: {}, installed: {} };
+    return { marketplaces: {}, installed: {}, managedMcpServers: [] };
   }
 }
 
@@ -54,7 +59,12 @@ export function saveConfig(config: PluginsConfig): void {
   }
   mkdirSync(dirname(CONFIG_PATH), { recursive: true });
   const tmp = `${CONFIG_PATH}.tmp`;
-  writeFileSync(tmp, `${JSON.stringify({ marketplaces, installed }, null, 2)}\n`, "utf8");
+  const managedMcpServers = config.managedMcpServers ?? [];
+  writeFileSync(
+    tmp,
+    `${JSON.stringify({ marketplaces, installed, managedMcpServers }, null, 2)}\n`,
+    "utf8",
+  );
   renameSync(tmp, CONFIG_PATH);
 }
 

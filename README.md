@@ -58,13 +58,19 @@ This means two installed plugins can both ship a `setup` skill without one shado
 
 Under the hood, the extension builds a shadow tree at `~/.pi/agent/claude-marketplaces/_resources/`: each `SKILL.md` gets copied with a rewritten `name:` frontmatter, and every other skill asset is symlinked back to the original clone. The tree is rebuilt from scratch on every discovery pass, so uninstalled plugins leave nothing behind.
 
+## MCP servers
+
+Pi has no built-in MCP support, but if you have the [pi-mcp-adapter](https://github.com/nicobailon/pi-mcp-adapter) extension installed, this extension registers plugin-shipped MCP servers (`.mcp.json` at the plugin root) in the adapter's pi-global config at `~/.pi/agent/mcp.json`. Server names get the same plugin-name prefix as skills, and `${CLAUDE_PLUGIN_ROOT}` in commands, args, or URLs is replaced with the plugin's install path.
+
+The extension tracks which entries it added, so uninstalling a plugin removes exactly those servers and nothing else. Servers you configured yourself are never overwritten, even on name collision. Without pi-mcp-adapter, `.mcp.json` is skipped with a warning, same as before.
+
 ## What is (not) supported
 
 | Claude Code plugin feature | pi |
 |---|---|
 | `skills/` (Agent Skills) | loaded as pi skills, namespaced |
 | `commands/` (slash commands) | loaded as pi prompt templates, namespaced |
-| `.mcp.json` (MCP servers) | skipped with a warning |
+| `.mcp.json` (MCP servers) | registered via pi-mcp-adapter when installed, otherwise skipped with a warning |
 | `.lsp.json` (LSP servers) | skipped |
 | `hooks/`, `agents/`, statusline scripts | skipped |
 

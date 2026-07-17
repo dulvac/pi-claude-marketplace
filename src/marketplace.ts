@@ -155,10 +155,10 @@ export async function resolvePluginDir(
 }
 
 /** Claude Code plugin features that pi cannot load. Used for install-time warnings. */
-export function unsupportedFeatures(pluginDir: string): string[] {
+export function unsupportedFeatures(pluginDir: string, options?: { mcpSupported?: boolean }): string[] {
   const found: string[] = [];
   const checks: Array<[string, string]> = [
-    [".mcp.json", "MCP servers (.mcp.json)"],
+    ...(options?.mcpSupported ? [] : [[".mcp.json", "MCP servers (.mcp.json)"] as [string, string]]),
     [".lsp.json", "LSP config (.lsp.json)"],
     ["hooks", "hooks"],
     ["agents", "agents"],
@@ -211,7 +211,7 @@ function sanitizeResourceName(name: string): string {
 }
 
 /** "tools" + "setup" -> "tools-setup"; already-prefixed names ("tools-lint") stay as-is. */
-function namespacedName(namespace: string, name: string): string {
+export function namespacedResourceName(namespace: string, name: string): string {
   const clean = sanitizeResourceName(name) || "unnamed";
   if (clean === namespace || clean.startsWith(`${namespace}-`)) return clean;
   return `${namespace}-${clean}`;
@@ -238,7 +238,7 @@ export function materializePluginResources(
     for (const skillDir of findSkillDirs(source.skills)) {
       const skillMd = readFileSync(join(skillDir, "SKILL.md"), "utf8");
       const originalName = frontmatterName(skillMd) ?? basename(skillDir);
-      const name = namespacedName(namespace, originalName);
+      const name = namespacedResourceName(namespace, originalName);
       const dest = join(skillsOut, name);
       mkdirSync(dest, { recursive: true });
       writeFileSync(join(dest, "SKILL.md"), withFrontmatterName(skillMd, name), "utf8");
@@ -255,7 +255,7 @@ export function materializePluginResources(
     for (const file of findMarkdownFiles(source.prompts)) {
       // commands/pr.md -> tools-pr.md; nested commands/foo/bar.md -> tools-foo-bar.md
       const segments = relative(source.prompts, file).replace(/\.md$/i, "").split(/[\\/]/);
-      const name = namespacedName(namespace, segments.join("-"));
+      const name = namespacedResourceName(namespace, segments.join("-"));
       mkdirSync(promptsOut, { recursive: true });
       symlinkSync(file, join(promptsOut, `${name}.md`));
     }
