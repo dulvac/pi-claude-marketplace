@@ -1,0 +1,37 @@
+{
+  "name": "pi-claude-marketplace",
+  "version": "0.1.0",
+  "description": "Browse and install Claude Code plugin marketplaces from pi: skills and commands, with per-marketplace git refs (branches/tags).",
+  "keywords": [
+    "pi-package",
+    "claude-code",
+    "marketplace",
+    "plugins",
+    "skills"
+  ],
+  "license": "MIT",
+  "author": "dulvac",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dulvac/pi-claude-marketplace.git"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*"
+  },
+  "pi": {
+    "extensions": [
+      "./src/index.ts"
+    ]
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.80.7",
+    "@earendil-works/pi-tui": "^0.80.7",
+    "@types/node": "^26.1.1",
+    "typebox": "^1.3.6",
+    "typescript": "^7.0.2"
+  },
+  "scripts": {
+    "typecheck": "node node_modules/typescript/lib/tsc.js --noEmit"
+  }
+}
