@@ -54,7 +54,7 @@ Marketplace specs accept GitHub shorthand (`owner/repo`), full HTTPS/SSH git URL
 
 ## Plugin-shipped pi extensions
 
-Claude Code has no notion of a pi extension, so a plugin that wants a native pi command (one that runs code, not a prompt template) ships one itself. Put a file at `pi/index.ts`, `pi/index.js`, or `pi/index.mjs` in the plugin root (first match in that order wins) with a default export that takes pi's `ExtensionAPI`:
+Claude Code has no notion of a pi extension, so a plugin that wants a native pi command (one that runs code, not a prompt template) ships one itself. Put a file at `pi/index.ts` (preferred, see reload notes below), `pi/index.js`, or `pi/index.mjs` in the plugin root (first match in that order wins) with a default export that takes pi's `ExtensionAPI`:
 
 ```ts
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -72,9 +72,11 @@ The factory may be sync or async (`(pi) => void | Promise<void>`). It receives t
 How loading works:
 
 - Entries are loaded at pi startup and on `/reload`, before `/plugins` itself is registered. Only plugins already cloned on disk are considered; nothing touches git or the network at that point.
-- Each plugin is isolated. If its entry fails to import, has no callable default export, or throws from the factory, you get one warning at session start naming the plugin, and every other plugin still loads. A broken plugin extension never prevents pi from starting.
-- `/reload` re-runs the entry from the file on disk. The file comes from the marketplace clone, though, so a new plugin version only reaches pi after `/plugins update` (or `/plugins update <marketplace>`) pulls it; the update offers to reload.
-- The entry is imported through the same jiti runtime pi loads extensions with, so `@earendil-works/pi-coding-agent`, `@earendil-works/pi-tui` and `typebox` resolve to pi's own copies. Other bare imports have nowhere to resolve from, since a marketplace clone has no `node_modules`; stick to Node built-ins and those packages.
+- Each plugin is isolated. If its entry fails to import, has no callable default export, throws from the factory, or does not finish within 15 seconds, you get one warning at session start naming the plugin, and every other plugin still loads. A broken plugin extension never prevents pi from starting.
+- `/reload` re-runs `.ts` and plain `.js` entries from the file on disk, because pi creates a fresh module loader per load. `.mjs` entries (and `.js` entries under a package with `"type": "module"`) are imported natively and cached by Node for the life of the process, so edits to those need a pi restart. Prefer `.ts`. The file comes from the marketplace clone, so a new plugin version only reaches pi after `/plugins update` (or `/plugins update <marketplace>`) pulls it; the update offers to reload, which is enough for `.ts` and plain `.js`; for `.mjs`, restart pi.
+- The entry is imported through the same jiti runtime pi loads extensions with, so with current pi `@earendil-works/pi-coding-agent`, `@earendil-works/pi-tui` and `typebox` resolve to pi's own copies. Other bare imports have nowhere to resolve from, since a marketplace clone normally has no `node_modules`; stick to Node built-ins and those packages.
+
+Installing a plugin that ships `pi/` means running its code. The entry runs with your user's privileges every time pi starts, whether interactive, `pi -p`, or RPC, in every project, with no sandbox. A plugin that adds `pi/` in a later version starts executing after `/plugins update` with no new prompt. Only install plugins from marketplaces you trust, and read the entry before installing if you are unsure.
 
 ## Namespacing
 
@@ -97,7 +99,7 @@ The extension tracks which entries it added, so uninstalling a plugin removes ex
 | `skills/` (Agent Skills) | loaded as pi skills, namespaced |
 | `commands/` (slash commands) | loaded as pi prompt templates, namespaced |
 | `.mcp.json` (MCP servers) | registered via pi-mcp-adapter when installed, otherwise skipped with a warning |
-| `pi/index.ts` (pi only, this project's convention) | loaded as a pi extension (commands, tools, events) under this extension's runtime |
+| `pi/index.ts` (pi only, this project's convention) | loaded as a pi extension (commands, tools, events) under this extension's runtime; runs the plugin's code at every pi startup |
 | `.lsp.json` (LSP servers) | skipped |
 | `hooks/`, `agents/`, statusline scripts | skipped |
 
