@@ -8,6 +8,7 @@ Claude Code plugins are mostly bundles of **skills** (Agent Skills `SKILL.md` fo
 - Marketplace sources support git refs, so you can pin a branch, tag, or commit.
 - Marketplaces already registered in Claude Code (`extraKnownMarketplaces` in `~/.claude/settings.json` and `.claude/settings.json`) show up with zero setup.
 - Installed plugin skills load as pi skills, and plugin `commands/*.md` load as pi prompt templates.
+- A plugin can also ship a pi extension at `pi/index.ts`, which runs under this extension at startup. That is how a plugin gets a native `/command` in pi. See [Plugin-shipped pi extensions](#plugin-shipped-pi-extensions).
 
 ## Install
 
@@ -49,6 +50,31 @@ Marketplace specs accept GitHub shorthand (`owner/repo`), full HTTPS/SSH git URL
 
 - On every session start (and `/reload`), the extension materializes namespaced copies of the installed plugins' skills and commands and contributes them via pi's `resources_discover` hook. No pi settings mutation.
 - Plugins whose manifest `source` points at an external GitHub repo are cloned under `~/.pi/agent/claude-marketplaces/_external/`.
+- If an installed plugin ships `pi/index.ts`, it is imported and run as a pi extension at startup and on `/reload`. See [Plugin-shipped pi extensions](#plugin-shipped-pi-extensions).
+
+## Plugin-shipped pi extensions
+
+Claude Code has no notion of a pi extension, so a plugin that wants a native pi command (one that runs code, not a prompt template) ships one itself. Put a file at `pi/index.ts`, `pi/index.js`, or `pi/index.mjs` in the plugin root (first match in that order wins) with a default export that takes pi's `ExtensionAPI`:
+
+```ts
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+
+export default function (pi: ExtensionAPI) {
+  pi.registerCommand("hello", {
+    description: "Say hello",
+    handler: async (_args, ctx) => ctx.ui.notify("hello", "info"),
+  });
+}
+```
+
+The factory may be sync or async (`(pi) => void | Promise<void>`). It receives the same `ExtensionAPI` this extension got, so it can register commands, tools, and event handlers like any pi extension.
+
+How loading works:
+
+- Entries are loaded at pi startup and on `/reload`, before `/plugins` itself is registered. Only plugins already cloned on disk are considered; nothing touches git or the network at that point.
+- Each plugin is isolated. If its entry fails to import, has no callable default export, or throws from the factory, you get one warning at session start naming the plugin, and every other plugin still loads. A broken plugin extension never prevents pi from starting.
+- `/reload` re-runs the entry from the file on disk. The file comes from the marketplace clone, though, so a new plugin version only reaches pi after `/plugins update` (or `/plugins update <marketplace>`) pulls it; the update offers to reload.
+- The entry is imported through the same jiti runtime pi loads extensions with, so `@earendil-works/pi-coding-agent`, `@earendil-works/pi-tui` and `typebox` resolve to pi's own copies. Other bare imports have nowhere to resolve from, since a marketplace clone has no `node_modules`; stick to Node built-ins and those packages.
 
 ## Namespacing
 
@@ -71,6 +97,7 @@ The extension tracks which entries it added, so uninstalling a plugin removes ex
 | `skills/` (Agent Skills) | loaded as pi skills, namespaced |
 | `commands/` (slash commands) | loaded as pi prompt templates, namespaced |
 | `.mcp.json` (MCP servers) | registered via pi-mcp-adapter when installed, otherwise skipped with a warning |
+| `pi/index.ts` (pi only, this project's convention) | loaded as a pi extension (commands, tools, events) under this extension's runtime |
 | `.lsp.json` (LSP servers) | skipped |
 | `hooks/`, `agents/`, statusline scripts | skipped |
 

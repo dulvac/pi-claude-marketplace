@@ -6,6 +6,7 @@ import type {
 import { renameSync, rmSync } from "node:fs";
 import type { SelectItem } from "@earendil-works/pi-tui";
 import {
+  CLONES_DIR,
   CONFIG_PATH,
   defaultMarketplaceName,
   describeSource,
@@ -32,13 +33,26 @@ import {
   type MarketplaceManifest,
 } from "./marketplace";
 import { join } from "node:path";
+import { installedPluginDirs, loadPluginExtensions } from "./extensions";
 import { pickFromList } from "./ui";
 import { mcpAdapterInstalled, pluginHasMcpServers, pluginMcpServers, syncManagedMcpServers } from "./mcp";
 
 const SUBCOMMANDS = ["add", "remove", "install", "uninstall", "update", "list"] as const;
 
-export default function (pi: ExtensionAPI) {
+export default async function (pi: ExtensionAPI) {
   const exec: Exec = (command, args, options) => pi.exec(command, args, options);
+
+  // Plugin-shipped pi extensions (`pi/index.{ts,js,mjs}`) run under this extension's
+  // runtime. Offline only: whatever is already cloned on disk, no git at factory time.
+  // Each failure is one warning, surfaced once the session has a UI.
+  const config = loadConfig();
+  const marketplaces = withClaudeSettingsMarketplaces(config, process.cwd());
+  const { warnings } = await loadPluginExtensions(pi, installedPluginDirs(config, marketplaces, CLONES_DIR));
+  if (warnings.length > 0) {
+    pi.on("session_start", async (_event, ctx) => {
+      for (const w of warnings) ctx.ui.notify(w, "warning");
+    });
+  }
 
   pi.on("resources_discover", async (event) => {
     return await collectResources(exec, event.cwd);

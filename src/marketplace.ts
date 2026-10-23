@@ -13,7 +13,7 @@ import {
   gitUrl,
   parseMarketplaceSpec,
   type MarketplaceSource,
-} from "./config";
+} from "./config.ts";
 
 /** Minimal shape of pi.exec we depend on. */
 export type Exec = (
@@ -42,15 +42,15 @@ export interface MarketplaceManifest {
 
 const GIT_TIMEOUT_MS = 120_000;
 
-export function marketplaceCloneDir(name: string): string {
-  return join(CLONES_DIR, sanitize(name));
+export function marketplaceCloneDir(name: string, clonesDir = CLONES_DIR): string {
+  return join(clonesDir, sanitize(name));
 }
 
 /** Where namespaced shadow copies of plugin skills/commands are materialized. */
 export const RESOURCES_DIR = join(CLONES_DIR, "_resources");
 
-function externalPluginCloneDir(repoOrUrl: string): string {
-  return join(CLONES_DIR, "_external", sanitize(repoOrUrl));
+export function externalPluginCloneDir(repoOrUrl: string, clonesDir = CLONES_DIR): string {
+  return join(clonesDir, "_external", sanitize(repoOrUrl));
 }
 
 function sanitize(name: string): string {
@@ -131,25 +131,48 @@ export async function resolvePluginDir(
   marketplaceDir: string,
   plugin: MarketplacePluginEntry,
 ): Promise<string | undefined> {
-  const source = plugin.source;
-  if (typeof source === "string") {
-    const rel = normalize(source).replace(/^(\.\/)+/, "");
-    if (rel.startsWith("..") || rel.startsWith("/")) return undefined;
-    const dir = join(marketplaceDir, rel);
-    return existsSync(dir) ? dir : undefined;
+  if (typeof plugin.source === "string") return relativePluginDir(marketplaceDir, plugin.source);
+  const external = externalPluginSource(plugin.source);
+  if (!external) return undefined;
+  const dir = externalPluginCloneDir(external.repo ?? external.url ?? plugin.name);
+  await ensureClone(exec, dir, external);
+  return dir;
+}
+
+/**
+ * Same resolution as `resolvePluginDir`, but never clones: an external plugin resolves
+ * only if its clone under `_external/` already exists. Safe to call at startup.
+ */
+export function resolvePluginDirOffline(
+  marketplaceDir: string,
+  plugin: MarketplacePluginEntry,
+  clonesDir = CLONES_DIR,
+): string | undefined {
+  if (typeof plugin.source === "string") return relativePluginDir(marketplaceDir, plugin.source);
+  const external = externalPluginSource(plugin.source);
+  if (!external) return undefined;
+  const dir = externalPluginCloneDir(external.repo ?? external.url ?? plugin.name, clonesDir);
+  return existsSync(dir) ? dir : undefined;
+}
+
+/** Relative-path source inside the marketplace clone; rejects paths escaping the clone. */
+function relativePluginDir(marketplaceDir: string, source: string): string | undefined {
+  const rel = normalize(source).replace(/^(\.\/)+/, "");
+  if (rel.startsWith("..") || rel.startsWith("/")) return undefined;
+  const dir = join(marketplaceDir, rel);
+  return existsSync(dir) ? dir : undefined;
+}
+
+/** Git source of an external (github/git) plugin entry, or undefined for unsupported shapes. */
+function externalPluginSource(source: MarketplacePluginEntry["source"]): MarketplaceSource | undefined {
+  if (!source || typeof source !== "object") return undefined;
+  if (source.source === "github" && source.repo) {
+    return { repo: source.repo, ref: source.ref };
   }
-  if (source && typeof source === "object") {
-    let external: MarketplaceSource | undefined;
-    if (source.source === "github" && source.repo) {
-      external = { repo: source.repo, ref: source.ref };
-    } else if ((source.source === "git" || source.url) && source.url) {
-      external = parseMarketplaceSpec(source.url) ?? { url: source.url };
-      external.ref = source.ref ?? external.ref;
-    }
-    if (!external) return undefined;
-    const dir = externalPluginCloneDir(external.repo ?? external.url ?? plugin.name);
-    await ensureClone(exec, dir, external);
-    return dir;
+  if ((source.source === "git" || source.url) && source.url) {
+    const external = parseMarketplaceSpec(source.url) ?? { url: source.url };
+    external.ref = source.ref ?? external.ref;
+    return external;
   }
   return undefined;
 }
