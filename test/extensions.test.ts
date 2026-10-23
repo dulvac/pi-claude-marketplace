@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -36,6 +36,29 @@ test("findPluginExtensionEntry only accepts regular files", () => {
   mkdirSync(join(d, "pi", "index.ts"), { recursive: true });
   assert.equal(findPluginExtensionEntry(d), undefined);
 });
+
+test(
+  "findPluginExtensionEntry treats an unreadable pi/ dir as no entry instead of throwing",
+  { skip: process.getuid?.() === 0 ? "root ignores directory permissions" : false },
+  async () => {
+    const d = tmp();
+    plugin(d, { "pi/index.ts": "" });
+    chmodSync(join(d, "pi"), 0o000);
+    try {
+      assert.equal(findPluginExtensionEntry(d), undefined);
+      const res = await loadPluginExtensions(
+        {} as any,
+        [{ marketplace: "mp", plugin: "a", dir: d }],
+        async () => {
+          throw new Error("must not import");
+        },
+      );
+      assert.deepEqual(res, { loaded: [], warnings: [] });
+    } finally {
+      chmodSync(join(d, "pi"), 0o755);
+    }
+  },
+);
 
 test("installedPluginDirs resolves relative-source plugins from existing clones", () => {
   const clones = tmp();
@@ -159,6 +182,38 @@ test("loadPluginExtensions warns when the entry has no callable default export",
   assert.deepEqual(res.loaded, []);
   assert.equal(res.warnings.length, 1);
   assert.match(res.warnings[0]!, /no default export function/);
+});
+
+test("loadPluginExtensions accepts a module that is itself the factory (CJS interop)", async () => {
+  const d = tmp();
+  plugin(d, { "pi/index.js": "" });
+  const calls: unknown[] = [];
+  const fakePi = { tag: "pi" };
+  const res = await loadPluginExtensions(
+    fakePi as any,
+    [{ marketplace: "mp", plugin: "a", dir: d }],
+    async () => (api: unknown) => {
+      calls.push(api);
+    },
+  );
+  assert.deepEqual(res, { loaded: ["mp/a"], warnings: [] });
+  assert.deepEqual(calls, [fakePi]);
+});
+
+test("loadPluginExtensions reports a rejected import as one warning", async () => {
+  const d = tmp();
+  plugin(d, { "pi/index.ts": "" });
+  const res = await loadPluginExtensions(
+    {} as any,
+    [{ marketplace: "mp", plugin: "a", dir: d }],
+    async () => {
+      throw new SyntaxError("Unexpected token");
+    },
+  );
+  assert.deepEqual(res, {
+    loaded: [],
+    warnings: ["plugins: mp/a pi extension failed: Unexpected token"],
+  });
 });
 
 test("loadPluginExtensions loads a directory listed by two marketplaces once", async () => {

@@ -15,13 +15,24 @@ export interface InstalledPlugin {
   dir: string;
 }
 
-/** Path of the plugin's pi extension entry (`pi/index.{ts,js,mjs}`), if it ships one. */
+/**
+ * Path of the plugin's pi extension entry (`pi/index.{ts,js,mjs}`), if it ships one.
+ * Never throws: unreadable or cyclic paths count as "no entry", like `existsSync`.
+ */
 export function findPluginExtensionEntry(pluginDir: string): string | undefined {
   for (const name of ENTRY_CANDIDATES) {
     const candidate = join(pluginDir, "pi", name);
-    if (statSync(candidate, { throwIfNoEntry: false })?.isFile()) return candidate;
+    if (isFile(candidate)) return candidate;
   }
   return undefined;
+}
+
+function isFile(path: string): boolean {
+  try {
+    return statSync(path, { throwIfNoEntry: false })?.isFile() ?? false;
+  } catch {
+    return false;
+  }
 }
 
 /**
