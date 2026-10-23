@@ -216,6 +216,27 @@ test("loadPluginExtensions reports a rejected import as one warning", async () =
   });
 });
 
+test("loadPluginExtensions gives up on a factory that never settles and continues", async () => {
+  const a = tmp();
+  plugin(a, { "pi/index.ts": "" });
+  const b = tmp();
+  plugin(b, { "pi/index.ts": "" });
+  const res = await loadPluginExtensions(
+    {} as any,
+    [
+      { marketplace: "mp", plugin: "hang", dir: a },
+      { marketplace: "mp", plugin: "ok", dir: b },
+    ],
+    async (url) =>
+      url.includes(a) ? { default: () => new Promise(() => {}) } : { default: () => {} },
+    { factoryTimeoutMs: 20 },
+  );
+  assert.deepEqual(res, {
+    loaded: ["mp/ok"],
+    warnings: ["plugins: mp/hang pi extension failed: factory did not finish within 20ms"],
+  });
+});
+
 test("loadPluginExtensions loads a directory listed by two marketplaces once", async () => {
   const d = tmp();
   plugin(d, { "pi/index.ts": "" });
