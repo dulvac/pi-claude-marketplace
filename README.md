@@ -49,6 +49,7 @@ Marketplace specs accept GitHub shorthand (`owner/repo`), full HTTPS/SSH git URL
 
 - On every session start (and `/reload`), the extension materializes namespaced copies of the installed plugins' skills and commands and contributes them via pi's `resources_discover` hook. No pi settings mutation.
 - Plugins whose manifest `source` points at an external GitHub repo are cloned under `~/.pi/agent/claude-marketplaces/_external/`.
+- A plugin may ship a pi extension at `pi/index.ts` (or `pi/index.js`, `pi/index.mjs`) with a default export `(pi: ExtensionAPI) => void | Promise<void>`. Installed plugins' entries are imported and run at pi startup and on `/reload`, under this extension's runtime, so they can register commands, tools and event handlers like any other pi extension. A plugin whose entry fails to import or whose factory throws produces one warning at session start and never blocks the other plugins. Loading reads only what is already on disk, so a new plugin version reaches pi after `/plugins update`, which offers to reload.
 
 ## Namespacing
 
@@ -71,6 +72,7 @@ The extension tracks which entries it added, so uninstalling a plugin removes ex
 | `skills/` (Agent Skills) | loaded as pi skills, namespaced |
 | `commands/` (slash commands) | loaded as pi prompt templates, namespaced |
 | `.mcp.json` (MCP servers) | registered via pi-mcp-adapter when installed, otherwise skipped with a warning |
+| `pi/index.ts` (pi extension, this project's convention) | loaded as a pi extension (commands, tools, events) under this extension's runtime |
 | `.lsp.json` (LSP servers) | skipped |
 | `hooks/`, `agents/`, statusline scripts | skipped |
 
