@@ -1,5 +1,7 @@
-import { existsSync } from "node:fs";
+import { statSync } from "node:fs";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import type { MarketplaceSource, PluginsConfig } from "./config.ts";
 import { marketplaceCloneDir, readManifest, resolvePluginDirOffline } from "./marketplace.ts";
 
@@ -17,7 +19,7 @@ export interface InstalledPlugin {
 export function findPluginExtensionEntry(pluginDir: string): string | undefined {
   for (const name of ENTRY_CANDIDATES) {
     const candidate = join(pluginDir, "pi", name);
-    if (existsSync(candidate)) return candidate;
+    if (statSync(candidate, { throwIfNoEntry: false })?.isFile()) return candidate;
   }
   return undefined;
 }
@@ -47,4 +49,50 @@ export function installedPluginDirs(
     }
   }
   return result;
+}
+
+/**
+ * Import and run the pi extension shipped by each installed plugin. Every plugin is
+ * isolated: an import or factory failure becomes one warning and never stops the
+ * others. A directory listed by several marketplaces is loaded once, under the first
+ * entry's name. `importModule` is injectable for tests; production uses dynamic
+ * `import()` with a cache-busting query so a reinstall picks up new code.
+ */
+export async function loadPluginExtensions(
+  pi: ExtensionAPI,
+  plugins: InstalledPlugin[],
+  importModule: (url: string) => Promise<unknown> = (url) => import(url),
+): Promise<{ loaded: string[]; warnings: string[] }> {
+  const loaded: string[] = [];
+  const warnings: string[] = [];
+  const seenDirs = new Set<string>();
+  for (const { marketplace, plugin, dir } of plugins) {
+    if (seenDirs.has(dir)) continue;
+    seenDirs.add(dir);
+    const entry = findPluginExtensionEntry(dir);
+    if (!entry) continue;
+    const name = `${marketplace}/${plugin}`;
+    try {
+      const mod = await importModule(pathToFileURL(entry).href + "?v=" + Date.now());
+      const factory = extensionFactory(mod);
+      if (!factory) throw new Error(`${entry} has no default export function`);
+      await factory(pi);
+      loaded.push(name);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      warnings.push(`plugins: ${name} pi extension failed: ${message}`);
+    }
+  }
+  return { loaded, warnings };
+}
+
+type ExtensionFactory = (pi: ExtensionAPI) => unknown;
+
+/** The module's `default` export when it is a function, or the module itself (CJS interop). */
+function extensionFactory(mod: unknown): ExtensionFactory | undefined {
+  if (typeof mod === "function") return mod as ExtensionFactory;
+  if (mod && typeof mod === "object" && "default" in mod && typeof mod.default === "function") {
+    return mod.default as ExtensionFactory;
+  }
+  return undefined;
 }

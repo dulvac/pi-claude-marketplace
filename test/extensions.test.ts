@@ -3,7 +3,11 @@ import assert from "node:assert/strict";
 import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { findPluginExtensionEntry, installedPluginDirs } from "../src/extensions.ts";
+import {
+  findPluginExtensionEntry,
+  installedPluginDirs,
+  loadPluginExtensions,
+} from "../src/extensions.ts";
 
 function tmp() {
   return mkdtempSync(join(tmpdir(), "pcm-"));
@@ -25,6 +29,12 @@ test("findPluginExtensionEntry prefers index.ts, then index.js, then index.mjs",
   assert.equal(findPluginExtensionEntry(d), join(d, "pi", "index.js"));
   plugin(d, { "pi/index.ts": "" });
   assert.equal(findPluginExtensionEntry(d), join(d, "pi", "index.ts"));
+});
+
+test("findPluginExtensionEntry only accepts regular files", () => {
+  const d = tmp();
+  mkdirSync(join(d, "pi", "index.ts"), { recursive: true });
+  assert.equal(findPluginExtensionEntry(d), undefined);
 });
 
 test("installedPluginDirs resolves relative-source plugins from existing clones", () => {
@@ -77,4 +87,96 @@ test("installedPluginDirs resolves external plugins only when already cloned", (
   assert.deepEqual(installedPluginDirs(cfg, mps, clones), [
     { marketplace: "mp", plugin: "ext", dir: extDir },
   ]);
+});
+
+test("loadPluginExtensions imports each entry with a cache-busting query and calls default(pi)", async () => {
+  const d = tmp();
+  plugin(d, { "pi/index.ts": "" });
+  const calls: unknown[] = [];
+  const urls: string[] = [];
+  const fakePi = { tag: "pi" };
+  const res = await loadPluginExtensions(
+    fakePi as any,
+    [{ marketplace: "mp", plugin: "a", dir: d }],
+    async (url) => {
+      urls.push(url);
+      return {
+        default: (api: unknown) => {
+          calls.push(api);
+        },
+      };
+    },
+  );
+  assert.deepEqual(res, { loaded: ["mp/a"], warnings: [] });
+  assert.deepEqual(calls, [fakePi]);
+  assert.match(urls[0]!, /^file:\/\/.*\/pi\/index\.ts\?v=\d+$/);
+});
+
+test("loadPluginExtensions skips plugins without a pi entry", async () => {
+  const d = tmp();
+  const res = await loadPluginExtensions(
+    {} as any,
+    [{ marketplace: "mp", plugin: "a", dir: d }],
+    async () => {
+      throw new Error("must not import");
+    },
+  );
+  assert.deepEqual(res, { loaded: [], warnings: [] });
+});
+
+test("loadPluginExtensions reports a throwing factory and continues", async () => {
+  const a = tmp();
+  plugin(a, { "pi/index.ts": "" });
+  const b = tmp();
+  plugin(b, { "pi/index.ts": "" });
+  const res = await loadPluginExtensions(
+    {} as any,
+    [
+      { marketplace: "mp", plugin: "a", dir: a },
+      { marketplace: "mp", plugin: "b", dir: b },
+    ],
+    async (url) =>
+      url.includes(a)
+        ? {
+            default: () => {
+              throw new Error("boom");
+            },
+          }
+        : { default: () => {} },
+  );
+  assert.deepEqual(res.loaded, ["mp/b"]);
+  assert.deepEqual(res.warnings, ["plugins: mp/a pi extension failed: boom"]);
+});
+
+test("loadPluginExtensions warns when the entry has no callable default export", async () => {
+  const d = tmp();
+  plugin(d, { "pi/index.ts": "" });
+  const res = await loadPluginExtensions(
+    {} as any,
+    [{ marketplace: "mp", plugin: "a", dir: d }],
+    async () => ({}),
+  );
+  assert.deepEqual(res.loaded, []);
+  assert.equal(res.warnings.length, 1);
+  assert.match(res.warnings[0]!, /no default export function/);
+});
+
+test("loadPluginExtensions loads a directory listed by two marketplaces once", async () => {
+  const d = tmp();
+  plugin(d, { "pi/index.ts": "" });
+  let factoryCalls = 0;
+  const res = await loadPluginExtensions(
+    {} as any,
+    [
+      { marketplace: "mp1", plugin: "ext", dir: d },
+      { marketplace: "mp2", plugin: "ext", dir: d },
+    ],
+    async () => ({
+      default: () => {
+        factoryCalls++;
+      },
+    }),
+  );
+  assert.equal(factoryCalls, 1);
+  assert.deepEqual(res, { loaded: ["mp1/ext"], warnings: [] });
 });
