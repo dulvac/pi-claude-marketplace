@@ -33,6 +33,6 @@
   },
   "scripts": {
     "typecheck": "node node_modules/typescript/lib/tsc.js --noEmit",
-    "test": "node --test test/*.test.ts"
+    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test test/*.test.ts"
   }
 }
